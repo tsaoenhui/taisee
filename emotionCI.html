@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BESTME情緒打卡小幫手</title>
+    
+    <!-- 載入 Tailwind CSS 框架 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 設定客製化 CIS 品牌色碼 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            blue: '#70CDE5', blue_bg: '#E3F5F9', blue_dark: '#2A839A',
+                            yellow: '#FAD460', yellow_bg: '#FEF9E6', yellow_dark: '#B38B1E',
+                            orange: '#F0A763', orange_bg: '#FDF2E8', orange_dark: '#A55E1D',
+                            red: '#E97D5C', red_bg: '#FCEDE8', red_dark: '#A14023',
+                            green: '#4BA84C', green_bg: '#E7F4E7', green_dark: '#286629',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- 載入 React 核心庫 -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- 載入 Babel 編譯器 -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- 載入 Tesseract.js (用於圖片 OCR 文字辨識) -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    
+    <!-- 載入 Chart.js (用於繪製統計圖表) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- 載入 SheetJS (用於匯出/匯入 Excel 檔案) -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+    <style>
+        /* 隱藏數字輸入框右側的上下小箭頭 */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen flex flex-col">
+    <!-- 應用程式渲染的掛載點 -->
+    <div id="root" class="flex-grow"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- 內建圖示元件 ---
+        const Icon = ({ path, className = "w-5 h-5", ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props} dangerouslySetInnerHTML={{ __html: path }} />
+        );
+        const Icons = {
+            Users: () => <Icon path='<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>' />,
+            CalendarCheck: () => <Icon path='<rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="m9 16 2 2 4-4"/>' />,
+            BarChart2: () => <Icon path='<line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/>' />,
+            Upload: () => <Icon path='<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>' />,
+            Download: () => <Icon path='<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>' />,
+            Plus: () => <Icon path='<line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/>' />,
+            X: () => <Icon path='<line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/>' />,
+            Trash2: () => <Icon path='<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>' />,
+            CalendarDays: () => <Icon path='<rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/>' />,
+            Loader2: () => <Icon className="w-5 h-5 animate-spin" path='<path d="M21 12a9 9 0 1 1-6.219-8.56"/>' />,
+            Settings: () => <Icon path='<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>' />
+        };
+
+        // --- 共用互動對話框組件 ---
+        function Modal({ isOpen, title, onClose, children }) {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <h3 className="font-bold text-slate-800 text-lg">{title}</h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+                                <Icons.X className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <div className="p-6">{children}</div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- 主程式開始 ---
+        function App() {
+            const [activeTab, setActiveTab] = useState('management');
+            
+            // 資料狀態
+            const [members, setMembers] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('bestme_members')) || []; } catch { return []; }
+            });
+            const [records, setRecords] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('bestme_records')) || {}; } catch { return {}; }
+            });
+
+            // 控制各類 Modal 開關
+            const [modals, setModals] = useState({ clear: false, import: false, alert: false });
+            const [alertMsg, setAlertMsg] = useState("");
+
+            const showAlert = (msg) => {
+                setAlertMsg(msg);
+                setModals(prev => ({ ...prev, alert: true }));
+            };
+
+            // 自動存檔機制
+            useEffect(() => localStorage.setItem('bestme_members', JSON.stringify(members)), [members]);
+            useEffect(() => localStorage.setItem('bestme_records', JSON.stringify(records)), [records]);
+
+            // --- 匯出資料功能 ---
+            const handleExportExcel = () => {
+                if (members.length === 0) return showAlert('沒有可匯出的資料喔！請先新增名單。');
+                
+                const wsMembers = XLSX.utils.json_to_sheet(members.map(m => ({ '成員ID': m.id, '組別': m.group, '暱稱': m.name })));
+                const recordData = [];
+                Object.keys(records).sort().forEach(date => {
+                    Object.entries(records[date]).forEach(([id, count]) => {
+                        const member = members.find(m => m.id === Number(id));
+                        if (member && count > 0) {
+                            recordData.push({ '日期': date, '組別': member.group, '暱稱': member.name, '打卡次數': count });
+                        }
+                    });
+                });
+                const wsRecords = XLSX.utils.json_to_sheet(recordData);
+
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, wsMembers, "成員名單");
+                XLSX.utils.book_append_sheet(wb, wsRecords, "每日打卡紀錄");
+                XLSX.writeFile(wb, "BESTME打卡原始資料.xlsx");
+            };
+
+            // --- 下載匯入模板功能 ---
+            const handleDownloadTemplate = () => {
+                const wsMembers = XLSX.utils.json_to_sheet([{ '成員ID': '', '組別': '示範組', '暱稱': '王小明' }]);
+                const wsRecords = XLSX.utils.json_to_sheet([{ '日期': '2024-05-20', '組別': '示範組', '暱稱': '王小明', '打卡次數': 3 }]);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, wsMembers, "成員名單");
+                XLSX.utils.book_append_sheet(wb, wsRecords, "每日打卡紀錄");
+                XLSX.writeFile(wb, "BESTME匯入模板.xlsx");
+            };
+
+            // --- 匯入資料處理邏輯 ---
+            const handleImportFile = (e, mode) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const data = new Uint8Array(evt.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        
+                        let newMembers = mode === 'replace' ? [] : [...members];
+                        let newRecords = mode === 'replace' ? {} : JSON.parse(JSON.stringify(records));
+
+                        // 解析成員名單
+                        if (workbook.Sheets["成員名單"]) {
+                            const importedMembers = XLSX.utils.sheet_to_json(workbook.Sheets["成員名單"]);
+                            importedMembers.forEach(row => {
+                                const group = (row['組別'] || '未分類').toString().trim();
+                                const name = (row['暱稱'] || '未命名').toString().trim();
+                                const exists = newMembers.find(m => m.group === group && m.name === name);
+                                if (!exists) {
+                                    newMembers.push({ id: row['成員ID'] || Date.now() + Math.random(), group, name });
+                                }
+                            });
+                        }
+
+                        // 解析打卡紀錄
+                        if (workbook.Sheets["每日打卡紀錄"]) {
+                            const importedRecords = XLSX.utils.sheet_to_json(workbook.Sheets["每日打卡紀錄"]);
+                            importedRecords.forEach(row => {
+                                const date = row['日期'];
+                                const group = (row['組別'] || '').toString().trim();
+                                const name = (row['暱稱'] || '').toString().trim();
+                                const count = parseInt(row['打卡次數']) || 0;
+                                
+                                if (date && name && count > 0) {
+                                    // 依賴「組別+暱稱」進行配對
+                                    const member = newMembers.find(m => m.group === group && m.name === name);
+                                    if (member) {
+                                        if (!newRecords[date]) newRecords[date] = {};
+                                        // 若是疊加模式，同日同人則將數字相加；取代模式因已清空所以直接賦值
+                                        newRecords[date][member.id] = (newRecords[date][member.id] || 0) + count;
+                                    }
+                                }
+                            });
+                        }
+
+                        setMembers(newMembers);
+                        setRecords(newRecords);
+                        setModals(prev => ({ ...prev, import: false }));
+                        showAlert("成功匯入資料！");
+                    } catch (err) {
+                        showAlert("檔案格式讀取失敗，請確認是否為正確的 Excel 格式。");
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+                e.target.value = ''; // 清空 input 確保下次可再選
+            };
+
+            const renderTabContent = () => {
+                switch (activeTab) {
+                    case 'management': return <ManagementTab members={members} setMembers={setMembers} />;
+                    case 'input': return <InputTab members={members} records={records} setRecords={setRecords} />;
+                    case 'stats': return <StatsTab members={members} records={records} />;
+                    default: return null;
+                }
+            };
+
+            return (
+                <>
+                    <header className="bg-white shadow-sm sticky top-0 z-20">
+                        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+                            <h1 className="text-xl font-bold text-brand-blue flex items-center gap-2">
+                                <Icons.CalendarCheck />
+                                BESTME情緒打卡小幫手
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setModals(prev => ({ ...prev, import: true }))} className="text-sm px-3 py-2 rounded-lg bg-brand-blue_bg text-brand-blue_dark hover:bg-[#c9edf5] flex items-center gap-1 font-medium transition-colors border border-brand-blue">
+                                    <Icons.Upload className="w-4 h-4"/> 匯入資料
+                                </button>
+                                <button onClick={handleExportExcel} className="text-sm px-3 py-2 rounded-lg bg-brand-green_bg text-brand-green_dark hover:bg-[#cdecd0] flex items-center gap-1 font-medium transition-colors border border-brand-green">
+                                    <Icons.Download className="w-4 h-4" /> 匯出資料
+                                </button>
+                                <button onClick={() => setModals(prev => ({ ...prev, clear: true }))} className="text-sm px-3 py-2 rounded-lg bg-brand-red_bg text-brand-red_dark hover:bg-[#f8dbd3] flex items-center gap-1 font-medium transition-colors border border-brand-red">
+                                    <Icons.Trash2 className="w-4 h-4" /> 清空
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div className="max-w-6xl mx-auto px-4 flex gap-6 border-b border-slate-200">
+                            <TabButton active={activeTab === 'management'} onClick={() => setActiveTab('management')} icon={<Icons.Users />} text="名單管理" />
+                            <TabButton active={activeTab === 'input'} onClick={() => setActiveTab('input')} icon={<Icons.CalendarCheck />} text="打卡統計" />
+                            <TabButton active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} icon={<Icons.BarChart2 />} text="結果彙整" />
+                        </div>
+                    </header>
+
+                    <main className="max-w-6xl mx-auto p-4 py-8 relative flex-grow w-full">
+                        {renderTabContent()}
+                    </main>
+
+                    {/* 頁尾資訊 */}
+                    <footer className="mt-12 text-center text-sm text-slate-400 pb-8">
+                        <p>
+                            <a href="mailto:angelcao@gmail.com" className="text-brand-blue hover:underline font-medium transition-colors">En-Hui</a> & AI 製作 | 第 1 版
+                        </p>
+                    </footer>
+
+                    {/* --- 以下為各類對話框 Modal --- */}
+                    
+                    {/* 清空確認 Modal */}
+                    <Modal isOpen={modals.clear} title="⚠️ 清空資料確認" onClose={() => setModals(prev => ({ ...prev, clear: false }))}>
+                        <p className="text-slate-600 mb-6">您確定要清空所有的「成員名單」與「打卡紀錄」嗎？<br/><strong className="text-brand-red_dark">此動作將無法復原。</strong>建議您先匯出備份。</p>
+                        <div className="flex gap-3 justify-end">
+                            <button onClick={() => setModals(prev => ({ ...prev, clear: false }))} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors">取消</button>
+                            <button onClick={() => {
+                                setMembers([]);
+                                setRecords({});
+                                setModals(prev => ({ ...prev, clear: false }));
+                                showAlert("已成功清空所有資料。");
+                            }} className="px-4 py-2 bg-brand-red_dark text-white rounded-lg hover:bg-[#85351e] transition-colors">確認清空</button>
+                        </div>
+                    </Modal>
+
+                    {/* 匯入選項 Modal */}
+                    <Modal isOpen={modals.import} title="📥 匯入資料" onClose={() => setModals(prev => ({ ...prev, import: false }))}>
+                        <div className="space-y-4">
+                            <div className="p-4 bg-brand-yellow_bg border border-brand-yellow rounded-lg text-brand-yellow_dark text-sm">
+                                <p className="mb-2"><strong>第一步：</strong> 若您沒有既有格式，請先下載模板：</p>
+                                <button onClick={handleDownloadTemplate} className="bg-white border border-brand-yellow text-brand-yellow_dark px-3 py-1.5 rounded shadow-sm hover:bg-slate-50 flex items-center gap-1 transition-colors">
+                                    <Icons.Download className="w-4 h-4"/> 下載 Excel 模板
+                                </button>
+                            </div>
+                            <div>
+                                <p className="text-slate-700 font-bold mb-2">第二步：選擇匯入方式</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="relative">
+                                        <input type="file" accept=".xlsx, .xls" className="hidden" id="import-append" onChange={(e) => handleImportFile(e, 'append')} />
+                                        <label htmlFor="import-append" className="cursor-pointer block p-3 border border-brand-blue rounded-lg bg-brand-blue_bg hover:bg-[#c9edf5] text-center transition-colors">
+                                            <span className="block font-bold text-brand-blue_dark">➕ 疊加資料</span>
+                                            <span className="block text-xs text-brand-blue_dark opacity-80 mt-1.5 leading-relaxed">保留現有資料<br/>並加入新名單與紀錄</span>
+                                        </label>
+                                    </div>
+                                    <div className="relative">
+                                        <input type="file" accept=".xlsx, .xls" className="hidden" id="import-replace" onChange={(e) => handleImportFile(e, 'replace')} />
+                                        <label htmlFor="import-replace" className="cursor-pointer block p-3 border border-brand-red rounded-lg bg-brand-red_bg hover:bg-[#f8dbd3] text-center transition-colors">
+                                            <span className="block font-bold text-brand-red_dark">🔄 取代資料</span>
+                                            <span className="block text-xs text-brand-red_dark opacity-80 mt-1.5 leading-relaxed">清空現有資料<br/>完全使用檔案內容</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </Modal>
+
+                    {/* 通用提示 Modal (代替 alert) */}
+                    <Modal isOpen={modals.alert} title="系統提示" onClose={() => setModals(prev => ({ ...prev, alert: false }))}>
+                        <p className="text-slate-700 mb-6">{alertMsg}</p>
+                        <div className="flex justify-end">
+                            <button onClick={() => setModals(prev => ({ ...prev, alert: false }))} className="px-6 py-2 bg-brand-blue text-white rounded-lg hover:bg-brand-blue_dark transition-colors">確定</button>
+                        </div>
+                    </Modal>
+                </>
+            );
+        }
+
+        // --- 分頁 1: 名單管理 ---
+        function ManagementTab({ members, setMembers }) {
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [ocrStatus, setOcrStatus] = useState('');
+            const fileInputRef = useRef(null);
+
+            const processImage = async (file) => {
+                setIsProcessing(true);
+                setOcrStatus('正在載入辨識引擎...');
+                
+                try {
+                    setOcrStatus('正在辨識圖片文字，請稍候...');
+                    const worker = await window.Tesseract.createWorker('chi_tra');
+                    const { data: { text } } = await worker.recognize(file);
+                    await worker.terminate();
+                    
+                    setOcrStatus('解析文字中...');
+                    parseOCRText(text);
+                } catch (error) {
+                    console.error(error);
+                    setOcrStatus('辨識發生錯誤，請手動輸入');
+                    setTimeout(() => setOcrStatus(''), 3000);
+                } finally {
+                    setIsProcessing(false);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                }
+            };
+
+            // 優化後的 OCR 辨識解析邏輯
+            const parseOCRText = (text) => {
+                const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                const newMembers = [];
+                let timestamp = Date.now();
+
+                lines.forEach((line) => {
+                    // 過濾掉明顯是介面的文字
+                    if (line.includes('成員(') || line.includes('<') || line.length < 2) return;
+                    
+                    // 1. 消除中文之間被 OCR 誤判產生的多餘空白
+                    let cleanedLine = line.replace(/([\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])/g, '$1');
+                    
+                    let group = '未分類';
+                    let name = cleanedLine;
+
+                    // 2. 解析組別與暱稱
+                    let match = cleanedLine.match(/^([^\-_:：\s]+)[\-_:：\s]+(.*)$/);
+
+                    if (match) {
+                        group = match[1].trim();
+                        name = match[2].trim();
+                    }
+
+                    if (name) {
+                        newMembers.push({ id: timestamp++, group, name });
+                    }
+                });
+
+                if (newMembers.length > 0) {
+                    setMembers(prev => [...prev, ...newMembers]);
+                    setOcrStatus(`成功匯入 ${newMembers.length} 筆資料！`);
+                } else {
+                    setOcrStatus('未辨識到有效名單');
+                }
+                setTimeout(() => setOcrStatus(''), 3000);
+            };
+
+            const updateMember = (id, field, value) => setMembers(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
+            const deleteMember = (id) => setMembers(prev => prev.filter(m => m.id !== id));
+            const addEmptyMember = () => setMembers(prev => [{ id: Date.now(), group: '新組別', name: '新成員' }, ...prev]);
+
+            return (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                    <div className="flex justify-between items-end">
+                        <div>
+                            <h2 className="text-2xl font-bold text-slate-800">名單管理</h2>
+                            <p className="text-slate-500 mt-1">匯入截圖或手手動編輯成員名單，系統將自動解析組別與暱稱。</p>
+                        </div>
+                        <button onClick={addEmptyMember} className="bg-brand-blue text-white font-bold px-4 py-2 rounded-lg hover:bg-[#5bc0d9] flex items-center gap-2 shadow-sm transition-colors">
+                            <Icons.Plus /> 新增單筆成員
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div 
+                            onClick={() => !isProcessing && fileInputRef.current?.click()}
+                            className={`col-span-1 bg-white p-6 rounded-xl shadow-sm flex flex-col items-center justify-center text-center gap-4 h-[22rem] border-dashed border-2 transition-all ${isProcessing ? 'border-slate-300 bg-slate-50 cursor-wait' : 'border-brand-blue hover:bg-brand-blue_bg cursor-pointer'}`}
+                        >
+                            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files[0] && processImage(e.target.files[0])} />
+                            
+                            {isProcessing ? (
+                                <>
+                                    <div className="text-brand-blue"><Icons.Loader2 /></div>
+                                    <div><h3 className="font-semibold text-slate-700">{ocrStatus}</h3></div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="w-16 h-16 bg-brand-blue_bg text-brand-blue rounded-full flex items-center justify-center"><Icons.Upload /></div>
+                                    <div>
+                                        <h3 className="font-semibold text-slate-700">上傳Line社群成員名稱截圖</h3>
+                                        <p className="text-sm text-slate-500 mt-1">系統將自動進行 OCR 辨識</p>
+                                        <p className="text-xs text-brand-red_dark mt-2 font-medium bg-brand-red_bg px-2 py-1 rounded inline-block shadow-sm">⚠️ 只要截取文字部分，不要包含大頭貼，以免辨識錯誤。</p>
+                                    </div>
+                                    <span className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium mt-1">選擇檔案</span>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="col-span-1 md:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[22rem]">
+                            <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+                                <h3 className="font-semibold text-slate-700">目前名單 ({members.length} 人) {ocrStatus && !isProcessing && <span className="text-sm text-brand-green_dark ml-2">{ocrStatus}</span>}</h3>
+                                <span className="text-xs bg-brand-yellow_bg text-brand-yellow_dark border border-brand-yellow px-2 py-1 rounded">請檢查結果並修正錯字</span>
+                            </div>
+                            
+                            <div className="overflow-x-auto overflow-y-auto flex-grow relative">
+                                {members.length === 0 ? (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+                                        <div className="mb-2 opacity-50"><Icons.Users /></div>
+                                        <p>目前尚無名單，請從左側上傳圖片或手動新增</p>
+                                    </div>
+                                ) : (
+                                    <table className="w-full text-left border-collapse">
+                                        <thead className="sticky top-0 bg-slate-50 shadow-sm z-10">
+                                            <tr className="text-slate-500 text-sm border-b border-slate-200">
+                                                <th className="p-3 font-medium w-2/5">組別</th>
+                                                <th className="p-3 font-medium w-2/5">暱稱</th>
+                                                <th className="p-3 font-medium text-right w-1/5">操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {members.map(m => (
+                                                <tr key={m.id} className="hover:bg-slate-50 transition-colors">
+                                                    <td className="p-2"><input type="text" value={m.group} onChange={(e) => updateMember(m.id, 'group', e.target.value)} className="border border-slate-200 rounded px-2 py-1.5 w-full text-sm focus:border-brand-blue outline-none" /></td>
+                                                    <td className="p-2"><input type="text" value={m.name} onChange={(e) => updateMember(m.id, 'name', e.target.value)} className="border border-slate-200 rounded px-2 py-1.5 w-full text-sm focus:border-brand-blue outline-none" /></td>
+                                                    <td className="p-2 text-right"><button onClick={() => deleteMember(m.id)} className="p-1.5 text-slate-400 hover:text-brand-red_dark rounded transition-colors"><Icons.Trash2 /></button></td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- 分頁 2: 打卡統計 ---
+        function InputTab({ members, records, setRecords }) {
+            const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+            const [isDateConfirmed, setIsDateConfirmed] = useState(false);
+
+            if (members.length === 0) {
+                 return (
+                    <div className="flex flex-col items-center justify-center h-64 bg-white rounded-xl border border-slate-200 shadow-sm animate-in fade-in">
+                        <div className="text-brand-orange mb-3"><Icons.Users /></div>
+                        <h3 className="text-lg font-bold text-slate-700">尚未建立名單</h3>
+                        <p className="text-slate-500 mt-1">請先至「名單管理」匯入或新增成員，才能開始打卡喔！</p>
+                    </div>
+                 );
+            }
+
+            if (!isDateConfirmed) {
+                return (
+                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-start pt-[10vh] justify-center z-50 p-4 animate-in fade-in">
+                        <div className="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 border-t-8 border-brand-blue mt-10">
+                            <div className="w-16 h-16 bg-brand-blue_bg text-brand-blue rounded-full flex items-center justify-center mb-4"><Icons.CalendarDays /></div>
+                            <h2 className="text-2xl font-bold text-slate-800 mb-2">確認打卡日期</h2>
+                            <p className="text-slate-500 text-sm mb-6 text-center">選擇要登記的日期</p>
+                            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border border-slate-300 rounded-lg px-4 py-3 text-lg font-bold text-center outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue_bg mb-6" />
+                            <button onClick={() => setIsDateConfirmed(true)} className="w-full bg-brand-blue text-white font-bold py-3 rounded-lg hover:bg-[#5bc0d9] shadow-md transition-colors">確認並開始登記</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            const currentRecords = records[date] || {};
+            const updateCount = (id, delta) => {
+                setRecords(prev => {
+                    const dayRecords = prev[date] || {};
+                    const current = dayRecords[id] || 0;
+                    return { ...prev, [date]: { ...dayRecords, [id]: Math.max(0, current + delta) } };
+                });
+            };
+
+            const handleKeyDown = (e, id) => {
+                if (e.key === '+' || e.key === '=') { e.preventDefault(); updateCount(id, 1); } 
+                else if (e.key === '-') { e.preventDefault(); updateCount(id, -1); } 
+                else if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); updateCount(id, -1); }
+            };
+
+            const groupedMembers = members.reduce((acc, m) => {
+                if (!acc[m.group]) acc[m.group] = [];
+                acc[m.group].push(m);
+                return acc;
+            }, {});
+
+            return (
+                <div className="space-y-6 pb-20 animate-in fade-in duration-300">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-slate-200 pb-4">
+                        <div>
+                            <div className="flex items-center gap-3">
+                                <h2 className="text-2xl font-bold text-slate-800">打卡統計</h2>
+                                <span className="bg-brand-blue_bg text-brand-blue font-bold px-3 py-1 rounded-full text-sm border border-brand-blue">{date}</span>
+                                <button onClick={() => setIsDateConfirmed(false)} className="text-xs text-slate-500 hover:text-brand-blue underline transition-colors">更改日期</button>
+                            </div>
+                            <p className="text-slate-500 mt-2 text-sm">💡 鍵盤快速輸入：按 <kbd className="bg-slate-100 border px-1 rounded shadow-sm">Tab</kbd> 切換人員；按 <kbd className="bg-slate-100 border px-1 rounded shadow-sm">+/-</kbd> 增加或減少次數。</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        {Object.entries(groupedMembers).map(([groupName, groupMembers]) => (
+                            <div key={groupName} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+                                <h3 className="font-bold text-slate-600 mb-3 flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-brand-orange"></div>{groupName}</h3>
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                                    {groupMembers.map(m => (
+                                        <div key={m.id} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded p-1.5 focus-within:border-brand-blue focus-within:ring-1">
+                                            <span className="text-sm font-medium text-slate-700 truncate pl-1" title={m.name}>{m.name}</span>
+                                            <div className="flex items-center bg-white border border-slate-200 rounded shadow-sm">
+                                                <button tabIndex="-1" onClick={() => updateCount(m.id, -1)} className="w-6 h-7 text-slate-400 hover:bg-slate-100 hover:text-brand-blue transition-colors">-</button>
+                                                <input type="number" value={currentRecords[m.id] || 0} onChange={(e) => {
+                                                    const val = parseInt(e.target.value) || 0;
+                                                    setRecords(prev => ({...prev, [date]: {...(prev[date]||{}), [m.id]: Math.max(0, val)}}));
+                                                }} onKeyDown={(e) => handleKeyDown(e, m.id)} min="0" className="w-8 h-7 text-center text-sm font-bold text-brand-blue outline-none" />
+                                                <button tabIndex="-1" onClick={() => updateCount(m.id, 1)} className="w-6 h-7 text-slate-400 hover:bg-slate-100 hover:text-brand-blue transition-colors">+</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        // --- 分頁 3: 彙整圖表 ---
+        function StatsTab({ members, records }) {
+            const dates = Object.keys(records).sort();
+            const [startDate, setStartDate] = useState(dates[0] || new Date().toISOString().split('T')[0]);
+            const [endDate, setEndDate] = useState(dates[dates.length - 1] || new Date().toISOString().split('T')[0]);
+            
+            // 圖表外觀設定狀態
+            const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+            const [lineColor, setLineColor] = useState('#70CDE5');
+            const [barPalette, setBarPalette] = useState('cis');
+            
+            // Canvas Refs
+            const trendChartRef = useRef(null);
+            const groupChartRef = useRef(null);
+            const trendInstance = useRef(null);
+            const groupInstance = useRef(null);
+
+            // 資料計算
+            const stats = useMemo(() => {
+                const validDates = dates.filter(d => d >= startDate && d <= endDate);
+                const memberTotal = {};
+                const groupTotal = {};
+                const dateTotal = {};
+                const allStars = [];
+                
+                members.forEach(m => {
+                    memberTotal[m.id] = 0;
+                    if (!groupTotal[m.group]) groupTotal[m.group] = 0;
+                });
+
+                validDates.forEach(date => {
+                    dateTotal[date] = 0;
+                    const dayRec = records[date] || {};
+                    Object.entries(dayRec).forEach(([mId, count]) => {
+                        const id = Number(mId);
+                        const member = members.find(m => m.id === id);
+                        if (member && count > 0) {
+                            memberTotal[id] += count;
+                            groupTotal[member.group] += count;
+                            dateTotal[date] += count;
+                        }
+                    });
+                });
+
+                if (validDates.length > 0) {
+                    members.forEach(m => {
+                        if (validDates.every(d => (records[d]?.[m.id] || 0) > 0)) allStars.push(m);
+                    });
+                }
+
+                const topMembers = members.map(m => ({ ...m, total: memberTotal[m.id] || 0 }))
+                    .filter(m => m.total > 0).sort((a, b) => b.total - a.total).slice(0, 3);
+
+                return { memberTotal, topMembers, allStars, groupTotal, dateTotal, validDates };
+            }, [members, records, startDate, endDate, dates]);
+
+            // 圖表數據匯出專用功能
+            const handleExportStats = () => {
+                // 產生彙總資料工作表
+                const wsGroup = XLSX.utils.json_to_sheet(Object.entries(stats.groupTotal).map(([group, total]) => ({ '組別': group, '總打卡數': total })));
+                const wsTrend = XLSX.utils.json_to_sheet(stats.validDates.map(date => ({ '日期': date, '當日總打卡數': stats.dateTotal[date] })));
+                const wsMember = XLSX.utils.json_to_sheet(members.map(m => ({ '組別': m.group, '暱稱': m.name, '個人總次數': stats.memberTotal[m.id] || 0 })).sort((a,b) => b['個人總次數'] - a['個人總次數']));
+                const wsAllStars = XLSX.utils.json_to_sheet(stats.allStars.map(m => ({ '組別': m.group, '暱稱': m.name })));
+                
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, wsGroup, "各組成就總計");
+                XLSX.utils.book_append_sheet(wb, wsTrend, "天數趨勢統計");
+                XLSX.utils.book_append_sheet(wb, wsMember, "個人成績總表");
+                XLSX.utils.book_append_sheet(wb, wsAllStars, "全勤獎");
+                XLSX.writeFile(wb, `BESTME結果彙整資料_${startDate}至${endDate}.xlsx`);
+            };
+
+            // 繪製趨勢圖 (折線圖)
+            useEffect(() => {
+                if (!trendChartRef.current || stats.validDates.length === 0) return;
+                if (trendInstance.current) trendInstance.current.destroy();
+
+                const ctx = trendChartRef.current.getContext('2d');
+                
+                // 將 HEX 轉為透明 rgba 供背景使用
+                const hexToRgba = (hex, alpha) => {
+                    const r = parseInt(hex.slice(1, 3), 16) || 112;
+                    const g = parseInt(hex.slice(3, 5), 16) || 205;
+                    const b = parseInt(hex.slice(5, 7), 16) || 229;
+                    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                };
+
+                trendInstance.current = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: stats.validDates,
+                        datasets: [{
+                            label: '當日總打卡數',
+                            data: stats.validDates.map(d => stats.dateTotal[d]),
+                            borderColor: lineColor,
+                            backgroundColor: hexToRgba(lineColor, 0.2),
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.3
+                        }]
+                    },
+                    options: { 
+                        responsive: true, 
+                        maintainAspectRatio: false, 
+                        plugins: { legend: { display: false } },
+                        scales: { y: { ticks: { precision: 0, stepSize: 1 } } } // Y軸整數
+                    }
+                });
+
+                return () => { if (trendInstance.current) trendInstance.current.destroy(); };
+            }, [stats.validDates, stats.dateTotal, lineColor]);
+
+            // 繪製各組成就圖 (固定長條圖)
+            useEffect(() => {
+                if (!groupChartRef.current || Object.keys(stats.groupTotal).length === 0) return;
+                if (groupInstance.current) groupInstance.current.destroy();
+
+                const ctx = groupChartRef.current.getContext('2d');
+                const labels = Object.keys(stats.groupTotal);
+                const data = labels.map(l => stats.groupTotal[l]);
+                
+                // 根據選擇的配色方案設定色彩池
+                const palettes = {
+                    cis: ['#FAD460', '#F0A763', '#E97D5C', '#70CDE5', '#4BA84C'],
+                    rainbow: ['#FF6B6B', '#4ECDC4', '#45B7D1', '#F7D794', '#9B59B6'],
+                    cool: ['#2C3E50', '#3498DB', '#2980B9', '#1ABC9C', '#16A085'],
+                    warm: ['#D35400', '#E67E22', '#F39C12', '#E74C3C', '#C0392B']
+                };
+                const activePalette = palettes[barPalette] || palettes.cis;
+                const colors = labels.map((_, i) => activePalette[i % activePalette.length]);
+
+                groupInstance.current = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{ label: '總次數', data: data, backgroundColor: colors, borderWidth: 1, borderColor: '#fff' }]
+                    },
+                    options: { 
+                        responsive: true, 
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { ticks: { precision: 0, stepSize: 1 } } } // Y軸整數
+                    }
+                });
+
+                return () => { if (groupInstance.current) groupInstance.current.destroy(); };
+            }, [stats.groupTotal, barPalette]);
+
+            return (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+                        <div>
+                            <h2 className="text-2xl font-bold text-slate-800">結果彙整</h2>
+                            <p className="text-slate-500 mt-1">目前已記錄 {dates.length} 天的資料。</p>
+                        </div>
+                        <div className="flex gap-2">
+                            <div className="flex items-center gap-2 bg-white p-1 rounded shadow-sm border border-slate-200">
+                                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="border-none bg-transparent rounded px-2 py-1 text-sm outline-none text-slate-600" />
+                                <span className="text-slate-400 self-center">至</span>
+                                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="border-none bg-transparent rounded px-2 py-1 text-sm outline-none text-slate-600" />
+                            </div>
+                            <button onClick={() => setIsSettingsOpen(true)} className="bg-white text-slate-600 border border-slate-300 px-3 py-2 rounded shadow-sm hover:bg-slate-50 text-sm font-medium transition-colors flex items-center gap-1">
+                                <Icons.Settings className="w-4 h-4"/> 格式設定
+                            </button>
+                            <button onClick={handleExportStats} className="bg-brand-orange text-white font-bold px-4 py-2 rounded shadow-sm hover:bg-[#e0934e] text-sm transition-colors flex items-center gap-1">
+                                <Icons.Download className="w-4 h-4"/> 匯出圖表資料
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-brand-yellow_bg p-6 rounded-xl border border-brand-yellow shadow-sm">
+                            <h3 className="text-brand-yellow_dark font-bold text-lg mb-4 flex items-center gap-2">🏆 全勤獎 ({stats.allStars.length}人)</h3>
+                            {stats.allStars.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                    {stats.allStars.map(m => <span key={m.id} className="bg-white px-3 py-1 rounded-full text-sm border border-brand-yellow text-brand-yellow_dark shadow-sm">{m.name}</span>)}
+                                </div>
+                            ) : <p className="text-brand-yellow_dark opacity-70 text-sm">此區間尚無全勤成員</p>}
+                        </div>
+
+                        <div className="bg-brand-blue_bg p-6 rounded-xl border border-brand-blue shadow-sm">
+                            <h3 className="text-brand-blue font-bold text-lg mb-4 flex items-center gap-2">👑 個人成就排行</h3>
+                            {stats.topMembers.length > 0 ? (
+                                <ul className="space-y-2">
+                                    {stats.topMembers.map((m, idx) => (
+                                        <li key={m.id} className="flex justify-between items-center bg-white p-2 rounded border border-brand-blue shadow-sm">
+                                            <span className="font-medium text-slate-700 truncate"><span className={`mr-2 font-bold ${idx===0?'text-brand-orange':idx===1?'text-slate-400':'text-brand-yellow_dark'}`}>{idx+1}.</span>{m.name}</span>
+                                            <span className="text-brand-blue font-bold">{m.total} 次</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : <p className="text-brand-blue opacity-70 text-sm">無排行資料</p>}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                            <h3 className="font-bold text-slate-700 mb-4">📈 天數趨勢</h3>
+                            <div className="h-64 relative">
+                                {stats.validDates.length > 0 ? <canvas ref={trendChartRef}></canvas> : <div className="absolute inset-0 flex items-center justify-center text-slate-400">尚無資料</div>}
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="font-bold text-slate-700">📊 各組成就</h3>
+                            </div>
+                            <div className="h-64 relative">
+                                {Object.keys(stats.groupTotal).length > 0 ? <canvas ref={groupChartRef}></canvas> : <div className="absolute inset-0 flex items-center justify-center text-slate-400">尚無資料</div>}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 圖表外觀設定 Modal */}
+                    <Modal isOpen={isSettingsOpen} title="🎨 圖表格式設定" onClose={() => setIsSettingsOpen(false)}>
+                        <div className="space-y-5">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">📈 天數趨勢圖顏色 (主色)</label>
+                                <div className="flex items-center gap-3">
+                                    <input type="color" value={lineColor} onChange={(e) => setLineColor(e.target.value)} className="w-10 h-10 rounded cursor-pointer border-0 p-0" />
+                                    <span className="text-slate-500 font-mono text-sm">{lineColor.toUpperCase()}</span>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">📊 各組成就圖配色 (色彩主題)</label>
+                                <select value={barPalette} onChange={(e) => setBarPalette(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-brand-blue">
+                                    <option value="cis">品牌設計色 (協和暖亮)</option>
+                                    <option value="rainbow">活力彩虹 (明亮活潑)</option>
+                                    <option value="cool">專業冷色 (沉穩藍綠)</option>
+                                    <option value="warm">大地暖色 (橘紅暖陽)</option>
+                                </select>
+                            </div>
+                            
+                            <div className="pt-4 border-t border-slate-100 flex justify-end">
+                                <button onClick={() => setIsSettingsOpen(false)} className="px-5 py-2 bg-brand-blue text-white rounded-lg hover:bg-[#5bc0d9] transition-colors">完成</button>
+                            </div>
+                        </div>
+                    </Modal>
+                </div>
+            );
+        }
+
+        // 共用頁籤按鈕
+        function TabButton({ active, onClick, icon, text }) {
+            return (
+                <button onClick={onClick} className={`flex items-center gap-2 px-1 py-4 border-b-2 font-medium text-sm transition-colors ${active ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}`}>
+                    {icon} {text}
+                </button>
+            );
+        }
+
+        // 啟動 React
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
